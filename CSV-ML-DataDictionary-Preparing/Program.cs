@@ -14,8 +14,11 @@ int.TryParse(Console.ReadLine(), out var entry);
 switch (entry)
 {
     case 1:
-        Console.WriteLine("What is the path of the CSV file that will be create data dictionary? (If there are multiple CSV files, please collect them all in a zip file and write its path.)");
-        string csvFilePath = Console.ReadLine();
+        Console.WriteLine("What is the path of the CSV file that will be create data dictionary? \n(If there are multiple CSV files, please collect them all in a zip file and write its path.) \n(If you have any CSV file for the columns, please add them to the zip file as columns.csv.)");
+        var csvFilePath = Console.ReadLine();
+
+        Console.Write("What is the delimiter of your CSV file? (default is ';')");
+        var delimiter = !string.IsNullOrEmpty(Console.ReadLine()) ? Console.ReadLine() : ";";
 
         if (string.IsNullOrWhiteSpace(csvFilePath) || !File.Exists(csvFilePath))
         {
@@ -36,10 +39,10 @@ switch (entry)
                     csvFileOnZipList.Add(csvFileonZip);
                 }
                 Console.WriteLine($"Total File Founds..: {i}");
-                new CsvtoDataDictionary(csvFileOnZipList, null);
+                new CsvtoDataDictionary(csvFileOnZipList, null, delimiter);
             }
         else if (csvFilePath.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
-            new CsvtoDataDictionary(null, new(csvFilePath));
+            new CsvtoDataDictionary(null, new(csvFilePath), delimiter);
         else
             Console.WriteLine("You must give zip or csv file. Please try again.");
         return;

@@ -1,23 +1,38 @@
-﻿using CsvHelper;
+﻿using ClosedXML.Excel;
+using CsvHelper;
 using CsvHelper.Configuration;
+using DocumentFormat.OpenXml.Spreadsheet;
 using System.Formats.Asn1;
 using System.Globalization;
 using System.IO.Compression;
 using System.Text;
+using TextCopy;
 
 namespace CSV_ML_DataDictionary_Preparing
 {
     public class CsvtoDataDictionary
     {
         private readonly List<ZipArchiveEntry>? _csvFiles;
-        private readonly FileInfo? _csvFile;
+        private readonly FileInfo? _csvFile; // Yet not developed for single csv file
         private readonly List<int> _indexOfColumns;
+        private readonly string _delimiter;
+        private readonly List<string> _columns;
+        private readonly CsvConfiguration _csvConfiguration;
+        private readonly bool _haveColumnsName = false;
 
-        public CsvtoDataDictionary(List<ZipArchiveEntry>? csvFiles, FileInfo? csvFile)
+        public CsvtoDataDictionary(List<ZipArchiveEntry>? csvFiles, FileInfo? csvFile, string delimiter)
         {
             _csvFiles = csvFiles != null && csvFiles.Count > 0 ? csvFiles : null;
             _csvFile = csvFile;
+            _delimiter = delimiter;
+            _csvConfiguration = new CsvConfiguration(CultureInfo.InvariantCulture)
+            {
+                HasHeaderRecord = false,
+                Delimiter = _delimiter
+            };
             _indexOfColumns = new();
+            _columns = new();
+
 
             for (int i = 0; i < 3; i++)
             {
@@ -26,84 +41,65 @@ namespace CSV_ML_DataDictionary_Preparing
 
             if (_csvFiles != null)
             {
-                var deneme = BuildGlobalMappings(_csvFiles, _indexOfColumns);
-
-                Console.WriteLine("----------------------------------------");
-
-                Console.WriteLine("Data Dictionary Content:");
-                Console.WriteLine("----------------------------------------");
-
-                // 1. Dış Döngü: Ana Dictionary'nin elemanlarında gezer
-                // (outerPair.Key bir int, outerPair.Value bir Dictionary<string, int>)
-                foreach (var outerPair in deneme)
+                if (_csvFiles.Any(x => x.Name.Equals("columns.csv", StringComparison.OrdinalIgnoreCase)))
                 {
-                    int outerKey = outerPair.Key;
-                    Dictionary<string, int> innerDictionary = outerPair.Value;
+                    var temp = _csvFiles.First(x => x.Name.Equals("columns.csv", StringComparison.OrdinalIgnoreCase));
+                    _haveColumnsName = true;
+                    _csvFiles.Remove(temp);
 
-                    // Dış anahtarı yazdır (Bizim senaryomuzda bu, sütun indeksiydi)
-                    Console.WriteLine($"Key (int): {outerKey}");
+                    Console.WriteLine("Reading columns.csv for column indexes...");
+                    using (var stream = temp.Open())
+                    using (var reader = new StreamReader(stream, Encoding.UTF8))
+                    using (var csv = new CsvReader(reader, _csvConfiguration))
+                        while (csv.Read())
+                            foreach (var colIndex in _indexOfColumns)
+                                try
+                                {
+                                    var stringValue = csv.GetField<string>(colIndex);
+                                    if (!string.IsNullOrEmpty(stringValue)) _columns.Add(stringValue);
+                                }
+                                catch (Exception ex)
+                                {
+                                    Console.WriteLine($"Warning: columns.csv - Could not read index {colIndex}. Row: {csv.Context.Parser.RawRecord?.Trim()}");
+                                    Console.WriteLine(ex.ToString());
+                                    throw;
+                                }
 
-                    // İç sözlüğün dolu olup olmadığını kontrol et
-                    if (innerDictionary == null || innerDictionary.Count == 0)
-                    {
-                        Console.WriteLine("  -> (The internal dictionary for this key is empty.)");
-                    }
-                    else
-                    {
-                        // 2. İç Döngü: İçteki Dictionary'nin elemanlarında gezer
-                        // (innerPair.Key bir string, innerPair.Value bir int)
-                        foreach (var innerPair in innerDictionary)
-                        {
-                            string innerKey = innerPair.Key;
-                            int innerValue = innerPair.Value;
-
-                            // İç anahtar/değer çiftini girintili olarak yazdır
-                            Console.WriteLine($"  -> '{innerKey}' (string)  =>  {innerValue} (int)");
-                        }
-                    }
-                    Console.WriteLine("----------------------------------------"); // Anahtarlar arası ayraç
                 }
             }
+
+            var dataDictionaryList = BuildGlobalMappings();
+
+            Console.WriteLine("----------------------------------------");
+
+            CreateExcelWithMappings(dataDictionaryList, _haveColumnsName);
         }
 
         /// <summary>
-        /// 1. PAS: Sütun İndeksine Göre Eşleme Oluşturur
+        /// Veri Sözlüğü oluşturmak için tüm CSV dosyalarını tarar ve belirtilen sütunlardaki benzersiz değerleri toplar.
         /// </summary>
-        private static Dictionary<int, Dictionary<string, int>> BuildGlobalMappings(List<ZipArchiveEntry> list, List<int> columnsToEncodeByIndex)
+        private Dictionary<int, Dictionary<string, int>> BuildGlobalMappings()
         {
-            // [Sütun İndeksi] -> [Değer -> ID]
             var mappings = new Dictionary<int, Dictionary<string, int>>();
             var nextId = new Dictionary<int, int>();
 
-            foreach (var colIndex in columnsToEncodeByIndex)
+            foreach (var colIndex in _indexOfColumns)
             {
                 mappings[colIndex] = new Dictionary<string, int>();
                 nextId[colIndex] = 1;
             }
 
-            var csvConfig = new CsvConfiguration(CultureInfo.InvariantCulture)
-            {
-                // EN ÖNEMLİ DEĞİŞİKLİK: Başlık satırı yok
-                HasHeaderRecord = false,
-                Delimiter = ";"
-            };
-
-            foreach (var entry in list)
+            foreach (var entry in _csvFiles)
             {
                 Console.WriteLine($"  Scanning: {entry.FullName}");
                 using (var stream = entry.Open())
                 using (var reader = new StreamReader(stream, Encoding.UTF8))
-                using (var csv = new CsvReader(reader, csvConfig))
-                {
-                    // 'dynamic' yerine satır satır manuel okuma
+                using (var csv = new CsvReader(reader, _csvConfiguration))
                     while (csv.Read())
-                    {
-                        foreach (var colIndex in columnsToEncodeByIndex)
-                        {
+                        foreach (var colIndex in _indexOfColumns)
                             try
                             {
-                                // Veriyi isme göre değil, İNDEKSE göre al
-                                string stringValue = csv.GetField<string>(colIndex);
+                                var stringValue = csv.GetField<string>(colIndex);
 
                                 if (!string.IsNullOrEmpty(stringValue) && !mappings[colIndex].ContainsKey(stringValue))
                                 {
@@ -113,15 +109,73 @@ namespace CSV_ML_DataDictionary_Preparing
                             }
                             catch (Exception ex)
                             {
-                                // Sütun indeksi satırda bulunamadı (örn: bozuk satır)
                                 Console.WriteLine($"Uyarı: {entry.FullName} - İndeks {colIndex} okunamadı. Satır: {csv.Context.Parser.RawRecord?.Trim()}");
                                 Console.WriteLine(ex.ToString());
+                                throw;
                             }
-                        }
-                    }
-                }
             }
             return mappings;
+        }
+
+        /// <summary>
+        /// Oluşturulan veri sözlüğü eşlemelerini içeren bir Excel dosyası oluşturur.
+        /// </summary>
+        /// <param name="mappings"></param>
+        private void CreateExcelWithMappings(Dictionary<int, Dictionary<string, int>> mappings, bool haveColumnsName)
+        {
+            using (var workbook = new XLWorkbook())
+            {
+                foreach (var firstDic in mappings)
+                {
+                    var columnNameForSheet = haveColumnsName ? _columns[firstDic.Key] : $"Column_{firstDic.Key + 1}";
+                    var columnNameForTable = haveColumnsName ? $"Column {firstDic.Key + 1} => {_columns[firstDic.Key]}" : $"Column {firstDic.Key + 1}";
+
+                    var ws = workbook.Worksheets.Add(columnNameForSheet);
+                    
+                    ws.Cell(1, 1).Value = columnNameForTable;
+                    
+                    var mergeRange = ws.Range(1, 1, 1, 2);
+                    mergeRange.Merge();
+                    mergeRange.Style.Font.Bold = true;
+                    mergeRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+                    mergeRange.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+                    mergeRange.Style.Border.OutsideBorder = XLBorderStyleValues.Medium;
+
+                    ws.Cell(2, 1).Value = "Key";
+                    ws.Cell(2, 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+                    ws.Cell(2, 1).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+                    ws.Cell(2,1).Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+
+                    ws.Cell(2, 2).Value = "Value";
+                    ws.Cell(2, 2).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+                    ws.Cell(2, 2).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+                    ws.Cell(2, 2).Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+
+                    var row = 3;
+
+                    foreach (var secondDic in firstDic.Value)
+                    {
+                        ws.Cell(row, 1).Value = secondDic.Key;
+                        ws.Cell(row, 2).Value = secondDic.Value;
+
+                        ws.Cell(row, 1).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+                        ws.Cell(row, 1).Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+
+                        ws.Cell(row, 2).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+                        ws.Cell(row, 2).Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+
+                        row++;
+                    }
+
+                    ws.Columns().AdjustToContents();
+                }
+
+                var filePath = "DataDictionary.xlsx";
+                workbook.SaveAs(filePath);
+
+                Console.WriteLine($"Data dictionary Excel file created: {Path.GetFullPath(filePath)} \nExcel File Path Copied.");
+                ClipboardService.SetText(Path.GetFullPath(filePath));
+            }
         }
     }
 }
