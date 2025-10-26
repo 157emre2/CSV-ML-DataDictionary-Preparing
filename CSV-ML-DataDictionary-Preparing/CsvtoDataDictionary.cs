@@ -13,7 +13,7 @@ namespace CSV_ML_DataDictionary_Preparing
     public class CsvtoDataDictionary
     {
         private readonly List<ZipArchiveEntry>? _csvFiles;
-        private readonly FileInfo? _csvFile; // Yet not developed for single csv file
+        private readonly FileInfo? _csvFile;
         private readonly List<int> _indexOfColumns;
         private readonly string _delimiter;
         private readonly List<string> _columns;
