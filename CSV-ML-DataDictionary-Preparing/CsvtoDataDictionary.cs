@@ -22,7 +22,7 @@ namespace CSV_ML_DataDictionary_Preparing
         private readonly Dictionary<int, Dictionary<string, int>> _dataDictionaryList;
         private readonly List<int> _ignoredColumnIndexes;
 
-        public CsvtoDataDictionary(List<ZipArchiveEntry>? csvFiles, FileInfo? csvFile, string delimiter, List<int>? ignoredColumnIndexes)
+        public CsvtoDataDictionary(List<ZipArchiveEntry>? csvFiles, FileInfo? csvFile, string delimiter, List<int>? ignoredColumnIndexes, string? outputhPath)
         {
             _csvFiles = csvFiles != null && csvFiles.Count > 0 ? csvFiles : null;
             _csvFile = csvFile;
@@ -101,7 +101,7 @@ namespace CSV_ML_DataDictionary_Preparing
 
 
             if (_dataDictionaryList != null)
-                CreateExcelWithMappings(_dataDictionaryList, _haveColumnsName);
+                CreateExcelWithMappings(_dataDictionaryList, _haveColumnsName, outputhPath);
         }
 
         /// <summary>
@@ -138,7 +138,7 @@ namespace CSV_ML_DataDictionary_Preparing
         /// <summary>
         /// Oluşturulan veri sözlüğü eşlemelerini içeren bir Excel dosyası oluşturur.
         /// </summary>
-        private void CreateExcelWithMappings(Dictionary<int, Dictionary<string, int>> mappings, bool haveColumnsName)
+        private void CreateExcelWithMappings(Dictionary<int, Dictionary<string, int>> mappings, bool haveColumnsName, string? outputPath)
         {
             using (var workbook = new XLWorkbook())
             {
@@ -197,7 +197,7 @@ namespace CSV_ML_DataDictionary_Preparing
                     ws.Columns().AdjustToContents();
                 }
 
-                var filePath = "DataDictionary.xlsx";
+                var filePath = string.IsNullOrEmpty(outputPath) ? "DataDictionary.xlsx" : Path.Combine(outputPath, "DataDictionary.xlsx");
                 workbook.SaveAs(filePath);
 
                 Console.WriteLine($"Data dictionary Excel file created: {Path.GetFullPath(filePath)} \nExcel File Path Copied.");

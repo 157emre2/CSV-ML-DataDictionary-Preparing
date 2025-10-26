@@ -20,9 +20,12 @@ switch (entry)
         Console.Write("What is the delimiter of your CSV file? (default is ';')");
         var delimiter = !string.IsNullOrEmpty(Console.ReadLine()) ? Console.ReadLine() : ";";
 
-        Console.Write("If you want ignore som columns. Please entry indexes of columns (You can split with ',')(First Column Index is 1)");
+        Console.WriteLine("If you want ignore som columns. Please entry indexes of columns \n(You can split with ',')\n(First Column Index is 1)");
         var entriedColumnIndexes = Console.ReadLine();
         var ignoredList = new List<int>();
+
+        Console.Write("Please entry data dictionary output path (If you leave it blank, the default file path will be copied automatically.)..:");
+        var outputPath = Console.ReadLine();
 
         if (!string.IsNullOrEmpty(entriedColumnIndexes))
             entriedColumnIndexes.Split(',').ToList().ForEach(x => ignoredList.Add(int.Parse(x))); 
@@ -46,10 +49,10 @@ switch (entry)
                     csvFileOnZipList.Add(csvFileonZip);
                 }
                 Console.WriteLine($"Total File Founds..: {i}");
-                new CsvtoDataDictionary(csvFileOnZipList, null, delimiter, ignoredList);
+                new CsvtoDataDictionary(csvFileOnZipList, null, delimiter, ignoredList, outputPath);
             }
         else if (csvFilePath.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
-            new CsvtoDataDictionary(null, new(csvFilePath), delimiter, ignoredList);
+            new CsvtoDataDictionary(null, new(csvFilePath), delimiter, ignoredList, outputPath);
         else
             Console.WriteLine("You must give zip or csv file. Please try again.");
         return;
