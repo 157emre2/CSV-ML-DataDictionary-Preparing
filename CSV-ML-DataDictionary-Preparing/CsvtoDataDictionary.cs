@@ -20,8 +20,9 @@ namespace CSV_ML_DataDictionary_Preparing
         private readonly CsvConfiguration _csvConfiguration;
         private readonly bool _haveColumnsName = false;
         private readonly Dictionary<int, Dictionary<string, int>> _dataDictionaryList;
+        private readonly List<int> _ignoredColumnIndexes;
 
-        public CsvtoDataDictionary(List<ZipArchiveEntry>? csvFiles, FileInfo? csvFile, string delimiter)
+        public CsvtoDataDictionary(List<ZipArchiveEntry>? csvFiles, FileInfo? csvFile, string delimiter, List<int>? ignoredColumnIndexes)
         {
             _csvFiles = csvFiles != null && csvFiles.Count > 0 ? csvFiles : null;
             _csvFile = csvFile;
@@ -33,6 +34,7 @@ namespace CSV_ML_DataDictionary_Preparing
             };
             _indexOfColumns = new();
             _columns = new();
+            _ignoredColumnIndexes = ignoredColumnIndexes;
 
             if (_csvFiles != null)
             {
@@ -156,17 +158,27 @@ namespace CSV_ML_DataDictionary_Preparing
                     mergeRange.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
                     mergeRange.Style.Border.OutsideBorder = XLBorderStyleValues.Medium;
 
-                    ws.Cell(2, 1).Value = "Key";
-                    ws.Cell(2, 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-                    ws.Cell(2, 1).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
-                    ws.Cell(2, 1).Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+                    if (!_ignoredColumnIndexes.Any(x => x == firstDic.Key + 1))
+                    {
+                        ws.Cell(2, 1).Value = "Key";
+                        ws.Cell(2, 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+                        ws.Cell(2, 1).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+                        ws.Cell(2, 1).Style.Border.InsideBorder = XLBorderStyleValues.Thin;
 
-                    ws.Cell(2, 2).Value = "Value";
-                    ws.Cell(2, 2).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-                    ws.Cell(2, 2).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
-                    ws.Cell(2, 2).Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+                        ws.Cell(2, 2).Value = "Value";
+                        ws.Cell(2, 2).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+                        ws.Cell(2, 2).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+                        ws.Cell(2, 2).Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+                    }else
+                    {
+                        ws.Cell(2, 1).Value = "This column is ignored.";
+                        var range = ws.Range(2, 1, 2, 2);
+                        range.Merge();
+                        range.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+                        range.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+                    }
 
-                    var row = 3;
+                        var row = 3;
 
                     foreach (var secondDic in firstDic.Value)
                     {
@@ -204,12 +216,15 @@ namespace CSV_ML_DataDictionary_Preparing
                     foreach (var colIndex in _indexOfColumns)
                         try
                         {
-                            var stringValue = csv.GetField<string>(colIndex);
-
-                            if (!string.IsNullOrEmpty(stringValue) && !mappings[colIndex].ContainsKey(stringValue))
+                            if (!_ignoredColumnIndexes.Any(x => x == colIndex + 1))
                             {
-                                mappings[colIndex][stringValue] = nextId[colIndex];
-                                nextId[colIndex]++;
+                                var stringValue = csv.GetField<string>(colIndex);
+
+                                if (!string.IsNullOrEmpty(stringValue) && !mappings[colIndex].ContainsKey(stringValue))
+                                {
+                                    mappings[colIndex][stringValue] = nextId[colIndex];
+                                    nextId[colIndex]++;
+                                }
                             }
                         }
                         catch (Exception ex)
