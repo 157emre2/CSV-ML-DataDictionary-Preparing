@@ -6,6 +6,7 @@ using System.Formats.Asn1;
 using System.Globalization;
 using System.IO.Compression;
 using System.Text;
+using System.Text.RegularExpressions;
 using TextCopy;
 
 namespace CSV_ML_DataDictionary_Preparing
@@ -144,10 +145,18 @@ namespace CSV_ML_DataDictionary_Preparing
             {
                 foreach (var firstDic in mappings)
                 {
-                    var columnNameForSheet = haveColumnsName ? _columns[firstDic.Key] : $"Column_{firstDic.Key + 1}";
+                    var columnNameForSheet = $"Column_{firstDic.Key + 1}";
                     var columnNameForTable = haveColumnsName ? $"Column {firstDic.Key + 1} => {_columns[firstDic.Key]}" : $"Column {firstDic.Key + 1}";
 
-                    var ws = workbook.Worksheets.Add(columnNameForSheet);
+                    var invalidCharsPattern = @"[\\/*?:\[\]]";
+                    var cleanSheetName = Regex.Replace(columnNameForSheet, invalidCharsPattern, "");
+
+                    if (cleanSheetName.Length > 31)
+                    {
+                        cleanSheetName = cleanSheetName.Substring(0, 31);
+                    }
+
+                    var ws = workbook.Worksheets.Add(cleanSheetName);
 
                     ws.Cell(1, 1).Value = columnNameForTable;
 
