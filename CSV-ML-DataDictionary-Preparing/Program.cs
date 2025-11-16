@@ -3,7 +3,7 @@ using System.IO.Compression;
 
 Console.WriteLine("--- App Starting ---\n\n\n");
 
-Console.WriteLine("This application is used for machine learning tasks to numerically convert CSV files and create a data dictionary for the CSV to be numerically converted.\n\n\n");
+Console.WriteLine("This application is used for machine learning tasks to numerically convert CSV files and create a data dictionary database for the CSV to be numerically converted.\n\n\n");
 
 Console.WriteLine("1 - Create a data dictionary for csv file/s.");
 Console.WriteLine("2 - Transform your csv file to numerically with your data dictionary.");
@@ -17,24 +17,24 @@ switch (entry)
         Console.WriteLine("What is the path of the CSV file that will be create data dictionary? \n(If there are multiple CSV files, please collect them all in a zip file and write its path.) \n(If you have any CSV file for the columns, please add them to the zip file as columns.csv.)");
         var csvFilePath = Console.ReadLine();
 
-        Console.Write("What is the delimiter of your CSV file? (default is ';')");
-        var delimiter = !string.IsNullOrEmpty(Console.ReadLine()) ? Console.ReadLine() : ";";
-
-        Console.WriteLine("If you want ignore som columns. Please entry indexes of columns \n(You can split with ',')\n(First Column Index is 1)");
-        var entriedColumnIndexes = Console.ReadLine();
-        var ignoredList = new List<int>();
-
-        Console.Write("Please entry data dictionary output path (If you leave it blank, the default file path will be copied automatically.)..:");
-        var outputPath = Console.ReadLine();
-
-        if (!string.IsNullOrEmpty(entriedColumnIndexes))
-            entriedColumnIndexes.Split(',').ToList().ForEach(x => ignoredList.Add(int.Parse(x))); 
-
         if (string.IsNullOrWhiteSpace(csvFilePath) || !File.Exists(csvFilePath))
         {
             Console.WriteLine("The provided path is invalid. Please restart the application and provide a valid path.");
             return;
         }
+
+        Console.Write("What is the delimiter of your CSV file? (default is ';')");
+        var delimiter = !string.IsNullOrEmpty(Console.ReadLine()) ? Console.ReadLine() : ";";
+
+        Console.WriteLine("If you want ignore some columns. Please entry indexes of columns \n(You can split with ',')\n(First Column Index is 1)");
+        var entriedColumnIndexes = Console.ReadLine();
+        var ignoredList = new List<int>();
+
+        if (!string.IsNullOrEmpty(entriedColumnIndexes))
+            entriedColumnIndexes.Split(',').ToList().ForEach(x => ignoredList.Add(int.Parse(x)));
+
+        Console.Write("Please entry data dictionary database (.db) output path (If you leave it blank, the default file path will be copied automatically.)..:");
+        var outputPath = Console.ReadLine();
 
         if (csvFilePath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
             using (var archive = ZipFile.OpenRead(csvFilePath))
