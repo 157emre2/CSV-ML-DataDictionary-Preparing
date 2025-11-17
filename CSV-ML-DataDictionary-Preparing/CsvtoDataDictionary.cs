@@ -97,6 +97,7 @@ namespace CSV_ML_DataDictionary_Preparing
 
 
             Console.WriteLine($"\tAll operations completed successfully aand your database location copied..: {_dbPath}");
+            ClipboardService.SetText(_dbPath ?? string.Empty);
             Console.WriteLine("\n\n--- App Ended ---");
         }
 
