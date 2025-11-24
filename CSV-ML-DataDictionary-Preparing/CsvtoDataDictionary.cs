@@ -169,8 +169,8 @@ namespace CSV_ML_DataDictionary_Preparing
                     foreach (var colIndex in _columns)
                         try
                         {
-                            var colValue = csv.GetField<string>(colIndex.Key);
                             if (_ignoredColumnIndexes.Any(x => x == colIndex.Key + 1)) continue;
+                            var colValue = csv.GetField<string>(colIndex.Key);
 
                             if (!string.IsNullOrEmpty(colValue))
                                 sqliteDic.InsertUniqueValue(colIndex.Key + 1, colIndex.Value, colValue);

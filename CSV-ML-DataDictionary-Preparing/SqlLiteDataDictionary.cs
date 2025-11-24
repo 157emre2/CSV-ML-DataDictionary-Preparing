@@ -22,7 +22,7 @@ namespace CSV_ML_DataDictionary_Preparing
                 dicPath = "dataDictionary.db";
             }
 
-            _connection = new SqliteConnection($"Data Source={Path.GetFullPath(dicPath)}");
+            _connection = new SqliteConnection($"Data Source={Path.GetFullPath(dicPath)}/dataDictionary.db");
             _connection.Open();
         }
 
@@ -47,7 +47,7 @@ namespace CSV_ML_DataDictionary_Preparing
             }
         }
 
-        public int InsertUniqueValue(int columnIndex, string? columnName, string value)
+        public void InsertUniqueValue(int columnIndex, string? columnName, string value)
         {
             var tableName = $"Column_{columnIndex}{(string.IsNullOrEmpty(columnName) ? "" : "_" + columnName)}";
 
@@ -58,18 +58,6 @@ namespace CSV_ML_DataDictionary_Preparing
 
                 insertCmd.Parameters.AddWithValue("@Value", value);
                 insertCmd.ExecuteNonQuery();
-            }
-
-            using (var selectCmd = _connection.CreateCommand())
-            {
-                selectCmd.CommandText =
-                    $"SELECT Id FROM {tableName} WHERE Value = @Value";
-
-                selectCmd.Parameters.AddWithValue("@Value", value);
-
-
-                var result = selectCmd.ExecuteScalar();
-                return Convert.ToInt32(result);
             }
         }
 
