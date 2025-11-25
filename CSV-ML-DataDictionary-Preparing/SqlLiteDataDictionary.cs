@@ -7,22 +7,15 @@ namespace CSV_ML_DataDictionary_Preparing
     {
         private readonly SqliteConnection _connection;
         private SqliteTransaction? _transaction;
-
-        // SQL Komutlarını tekrar tekrar oluşturmamak için önbellekliyoruz (Prepared Statements)
         private readonly Dictionary<string, SqliteCommand> _insertCommands = new();
 
         public string DatabasePath => _connection.DataSource;
 
         public SqlLiteDataDictionary(string? dicPath)
         {
-            if (string.IsNullOrEmpty(dicPath))
-            {
-                dicPath = AppDomain.CurrentDomain.BaseDirectory;
-            }
-
+            if (string.IsNullOrEmpty(dicPath)) dicPath = AppDomain.CurrentDomain.BaseDirectory;
             var dbFilePath = Path.Combine(Path.GetFullPath(dicPath), "dataDictionary.db");
 
-            // Pooling=True: Bağlantı havuzunu açar.
             var connectionString = new SqliteConnectionStringBuilder
             {
                 DataSource = dbFilePath,
@@ -34,43 +27,82 @@ namespace CSV_ML_DataDictionary_Preparing
             _connection = new SqliteConnection(connectionString);
             _connection.Open();
 
-            // --- PERFORMANCE TUNING ---
-            // Bu ayarlar 200GB veri için hayatidir. Senkronizasyonu kapatır, hızı 50x artırır.
+            // Performans ayarları
             using var cmd = _connection.CreateCommand();
             cmd.CommandText = @"
                 PRAGMA journal_mode = MEMORY; 
                 PRAGMA synchronous = OFF; 
                 PRAGMA temp_store = MEMORY; 
-                PRAGMA cache_size = 10000;
                 PRAGMA locking_mode = EXCLUSIVE;";
+            cmd.ExecuteNonQuery();
+
+            // LOG TABLOSUNU OLUŞTUR (Checkpoint için)
+            CreateLogTable();
+        }
+
+        private void CreateLogTable()
+        {
+            using var cmd = _connection.CreateCommand();
+            cmd.CommandText = @"
+                CREATE TABLE IF NOT EXISTS Process_Logs (
+                    FileName TEXT PRIMARY KEY,
+                    LastRowProcessed INTEGER,
+                    IsFinished BOOLEAN
+                );";
             cmd.ExecuteNonQuery();
         }
 
+        public (long LastRow, bool IsFinished) GetFileProgress(string fileName)
+        {
+            using var cmd = _connection.CreateCommand();
+            cmd.CommandText = "SELECT LastRowProcessed, IsFinished FROM Process_Logs WHERE FileName = @Name";
+            cmd.Parameters.AddWithValue("@Name", fileName);
+
+            using var reader = cmd.ExecuteReader();
+            if (reader.Read())
+            {
+                return (reader.GetInt64(0), reader.GetBoolean(1));
+            }
+            return (0, false);
+        }
+
+        public void UpdateProgress(string fileName, long lastRow, bool isFinished)
+        {
+            // Bu metod Transaction içinde çağrılacak!
+            var cmdText = @"
+                INSERT INTO Process_Logs (FileName, LastRowProcessed, IsFinished) 
+                VALUES (@Name, @Row, @Finished)
+                ON CONFLICT(FileName) DO UPDATE SET 
+                    LastRowProcessed = @Row,
+                    IsFinished = @Finished;";
+
+            // Cache mekanizması kullanmıyoruz çünkü burası sık çağrılmayacak
+            using var cmd = _connection.CreateCommand();
+            cmd.CommandText = cmdText;
+            cmd.Parameters.AddWithValue("@Name", fileName);
+            cmd.Parameters.AddWithValue("@Row", lastRow);
+            cmd.Parameters.AddWithValue("@Finished", isFinished);
+
+            if (_transaction != null) cmd.Transaction = _transaction;
+
+            cmd.ExecuteNonQuery();
+        }
+
+        // --- Eski Metodlar Aynen Kalıyor ---
         public void CreateTableIfNotExists(int columnIndex, string? columnName)
         {
             var tableName = GetTableName(columnIndex, columnName);
-
             using var command = _connection.CreateCommand();
-            command.CommandText = $@"
-                CREATE TABLE IF NOT EXISTS {tableName} (
-                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    Value TEXT UNIQUE
-                );";
-
+            command.CommandText = $@"CREATE TABLE IF NOT EXISTS {tableName} (Id INTEGER PRIMARY KEY AUTOINCREMENT, Value TEXT UNIQUE);";
             if (_transaction != null) command.Transaction = _transaction;
             command.ExecuteNonQuery();
         }
 
-        /// <summary>
-        /// Tek tek insert atmak yerine, gelen HashSet'i tek döngüde basar.
-        /// </summary>
         public void BatchInsert(int columnIndex, string? columnName, HashSet<string> uniqueValues)
         {
             if (uniqueValues == null || uniqueValues.Count == 0) return;
-
             var tableName = GetTableName(columnIndex, columnName);
 
-            // Komutu cache'den al veya yarat
             if (!_insertCommands.TryGetValue(tableName, out var cmd))
             {
                 cmd = _connection.CreateCommand();
@@ -78,17 +110,11 @@ namespace CSV_ML_DataDictionary_Preparing
                 var param = cmd.CreateParameter();
                 param.ParameterName = "@Value";
                 cmd.Parameters.Add(param);
-
                 _insertCommands[tableName] = cmd;
             }
 
-            // Aktif transaction'ı komuta ata
-            if (_transaction != null && cmd.Transaction != _transaction)
-            {
-                cmd.Transaction = _transaction;
-            }
+            if (_transaction != null && cmd.Transaction != _transaction) cmd.Transaction = _transaction;
 
-            // Parametre değerini değiştirip çalıştır (SQL Parsing maliyetini düşürür)
             foreach (var val in uniqueValues)
             {
                 cmd.Parameters["@Value"].Value = val;
@@ -96,42 +122,12 @@ namespace CSV_ML_DataDictionary_Preparing
             }
         }
 
-        private string GetTableName(int columnIndex, string? columnName)
-        {
-            // Tablo ismini sanitize etmeye gerek yok, zaten caller (çağıran) sanitize edilmiş isim yolluyor
-            return $"Column_{columnIndex}{(string.IsNullOrEmpty(columnName) ? "" : "_" + columnName)}";
-        }
+        private string GetTableName(int columnIndex, string? columnName) => $"Column_{columnIndex}{(string.IsNullOrEmpty(columnName) ? "" : "_" + columnName)}";
 
-        public void BeginTransaction()
-        {
-            if (_transaction == null)
-            {
-                _transaction = _connection.BeginTransaction();
-            }
-        }
+        public void BeginTransaction() { if (_transaction == null) _transaction = _connection.BeginTransaction(); }
 
-        public void CommitTransaction()
-        {
-            if (_transaction != null)
-            {
-                _transaction.Commit();
-                _transaction.Dispose();
-                _transaction = null;
-            }
-        }
+        public void CommitTransaction() { if (_transaction != null) { _transaction.Commit(); _transaction.Dispose(); _transaction = null; } }
 
-        public void Dispose()
-        {
-            // Önce cache'lenen komutları temizle
-            foreach (var cmd in _insertCommands.Values)
-            {
-                cmd.Dispose();
-            }
-            _insertCommands.Clear();
-
-            _transaction?.Dispose();
-            _connection.Close();
-            _connection.Dispose();
-        }
+        public void Dispose() { foreach (var cmd in _insertCommands.Values) cmd.Dispose(); _insertCommands.Clear(); _transaction?.Dispose(); _connection.Close(); _connection.Dispose(); }
     }
 }

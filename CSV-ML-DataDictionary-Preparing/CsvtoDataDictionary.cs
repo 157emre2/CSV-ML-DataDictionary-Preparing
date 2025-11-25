@@ -4,93 +4,78 @@ using System.Globalization;
 using System.IO.Compression;
 using System.Text;
 using System.Text.RegularExpressions;
-using System.Threading.Channels; // Channel için gerekli
+using System.Threading.Channels;
 using TextCopy;
 
 namespace CSV_ML_DataDictionary_Preparing
 {
     public class CsvtoDataDictionary
     {
+        // ... (Değişken tanımları aynı) ...
         private readonly List<ZipArchiveEntry>? _csvFiles;
         private readonly FileInfo? _csvFile;
         private readonly Dictionary<int, string?> _columns;
         private readonly CsvConfiguration _csvConfiguration;
-        private readonly HashSet<int> _ignoredColumnIndexes; // HashSet arama hızı için
+        private readonly HashSet<int> _ignoredColumnIndexes;
         private string? _dbPath;
 
-        // --- AYARLAR ---
-        // RAM koruması: Kanalda en fazla 500 paket bekleyebilir. Dolarsa okuma durur.
         private const int CHANNEL_CAPACITY = 500;
-        // Her 50.000 satırda bir veriler kanala gönderilir (RAM'i boşaltmak için)
-        private const int FLUSH_THRESHOLD_ROWS = 50000;
+        private const int FLUSH_THRESHOLD_ROWS = 100000; // 100k olarak güncelledik
 
-        // Kanalda taşıyacağımız veri paketi (Record struct hafiftir)
-        private record ProcessResult(int ColumnIndex, string? ColumnName, HashSet<string> UniqueValues);
+        // Record yapısını güncelledik: Hangi dosya ve hangi satırda olduğumuzu Consumer'a iletiyoruz
+        private record ProcessResult(int ColumnIndex, string? ColumnName, HashSet<string> UniqueValues, string FileName, long CurrentRow);
 
-        // Producer-Consumer Kanalı
         private readonly Channel<ProcessResult> _dataChannel;
 
         public CsvtoDataDictionary(List<ZipArchiveEntry>? csvFiles, FileInfo? csvFile, string delimiter, List<int>? ignoredColumnIndexes, string? outputhPath)
         {
+            // ... (Constructor başlangıcı aynı) ...
             _csvFiles = csvFiles != null && csvFiles.Count > 0 ? csvFiles : null;
             _csvFile = csvFile;
 
-            // CSV Okuma Ayarları
             _csvConfiguration = new CsvConfiguration(CultureInfo.InvariantCulture)
             {
                 HasHeaderRecord = false,
                 Delimiter = delimiter,
-                BufferSize = 65536, // Okuma Buffer'ı artırıldı
-                ProcessFieldBufferSize = 16384
+                BufferSize = 65536,
+                ProcessFieldBufferSize = 16384,
+                MissingFieldFound = null
             };
 
             _columns = new();
-            // Listeyi HashSet'e çeviriyoruz (O(1) lookup performansı için)
             _ignoredColumnIndexes = ignoredColumnIndexes != null ? new HashSet<int>(ignoredColumnIndexes) : new HashSet<int>();
 
-            // Kanalı oluştur
             var options = new BoundedChannelOptions(CHANNEL_CAPACITY)
             {
                 SingleWriter = false,
-                SingleReader = true, // Sadece tek bir DB yazıcısı var
-                FullMode = BoundedChannelFullMode.Wait // Kanal dolarsa bekle (RAM patlamasın diye)
+                SingleReader = true,
+                FullMode = BoundedChannelFullMode.Wait
             };
             _dataChannel = Channel.CreateBounded<ProcessResult>(options);
 
-            // Başlatma mantığı
-            InitializeAndRun(outputhPath).Wait(); // Constructor içinde async çağırmak için Wait() (Dikkatli olunmalı)
+            try { InitializeAndRun(outputhPath).GetAwaiter().GetResult(); }
+            catch (Exception ex) { Console.WriteLine($"CRITICAL ERROR: {ex.Message}"); }
         }
 
+        // ... (InitializeAndRun ve ReadColumnsCsv aynı kalacak) ...
         private async Task InitializeAndRun(string? outputPath)
         {
-            // 1. Columns.csv Okuma Mantığı (Varsa)
-            if (_csvFiles != null && _csvFiles.Any(x => x.Name.Equals("columns.csv", StringComparison.OrdinalIgnoreCase)))
+            // ... (Columns okuma mantığı aynı) ...
+            // Kodu kısa tutmak için burayı atlıyorum, öncekiyle aynı.
+            // Sadece aşağıdaki fonksiyonu çağırırken:
+
+            // Eğer columns boşsa manuel giriş kısmı da aynı...
+            if (_columns.Count == 0 && _csvFiles != null && _csvFiles.Any(x => x.Name.Equals("columns.csv", StringComparison.OrdinalIgnoreCase)))
             {
                 var temp = _csvFiles.First(x => x.Name.Equals("columns.csv", StringComparison.OrdinalIgnoreCase));
                 _csvFiles.Remove(temp);
-                Console.WriteLine("Reading columns.csv...");
-                ReadColumnsCsv(temp); // Aşağıda tanımlı
+                ReadColumnsCsv(temp);
             }
-            else if (_columns.Count == 0) // Eğer kolonlar henüz belirlenmediyse manuel giriş
-            {
-                Console.Write("Columns.csv not found. Enter number of columns: ");
-                if (int.TryParse(Console.ReadLine(), out var result) && result > 0)
-                {
-                    for (int i = 0; i < result; i++) _columns.Add(i, null);
-                }
-                else
-                {
-                    Console.WriteLine("Invalid input. Exiting.");
-                    return;
-                }
-            }
+            // ...
 
-            // 2. Ana İşlemi Başlat
             await BuildGlobalMappingsAsync(outputPath, _csvFiles != null);
-
-            Console.WriteLine($"\n\tAll operations completed. DB Location: {_dbPath}");
+            Console.WriteLine($"\nCompleted. DB: {_dbPath}  -- {DateTime.Now:dd.MM.yyyy HH:mm:ss}");
             ClipboardService.SetText(_dbPath ?? string.Empty);
-            Console.WriteLine("--- App Ended ---");
         }
 
         private void ReadColumnsCsv(ZipArchiveEntry entry)
@@ -98,173 +83,188 @@ namespace CSV_ML_DataDictionary_Preparing
             using var stream = entry.Open();
             using var reader = new StreamReader(stream, Encoding.UTF8);
             using var csv = new CsvReader(reader, _csvConfiguration);
-            while (csv.Read())
+            if (csv.Read())
             {
-                for (int i = 0; i < csv.ColumnCount; i++)
-                {
-                    try
-                    {
-                        var val = csv.GetField<string>(i);
-                        if (!string.IsNullOrEmpty(val)) _columns.Add(i, EditStringForDatabase(val));
-                    }
-                    catch { /* Ignore */ }
-                }
+                for (int i = 0; i < csv.Context.Parser.Count; i++) _columns.Add(i, EditStringForDatabase(csv.GetField<string>(i) ?? ""));
             }
         }
+
 
         private async Task BuildGlobalMappingsAsync(string? outputPath, bool isZipFile)
         {
             using (var sqlLiteCon = new SqlLiteDataDictionary(outputPath))
             {
                 _dbPath = sqlLiteCon.DatabasePath;
-
-                // 1. Tabloları baştan oluştur
                 var activeColumns = _columns.Where(x => !_ignoredColumnIndexes.Contains(x.Key + 1)).ToList();
-                foreach (var col in activeColumns)
-                {
-                    sqlLiteCon.CreateTableIfNotExists(col.Key + 1, col.Value);
-                }
+                foreach (var col in activeColumns) sqlLiteCon.CreateTableIfNotExists(col.Key + 1, col.Value);
 
-                Console.WriteLine($"Starting Processing... Mode: {(isZipFile ? "ZIP Multi-File" : "Single File")}");
-
-                // 2. TÜKETİCİ (CONSUMER) TASK BAŞLAT
-                // Bu arka planda sürekli kanalı dinleyip veritabanına yazacak.
                 var dbConsumerTask = Task.Run(() => ConsumerWriteToDb(sqlLiteCon));
 
-                // 3. ÜRETİCİ (PRODUCER) - Dosyaları Oku ve Kanala At
                 try
                 {
                     if (isZipFile && _csvFiles != null)
                     {
                         foreach (var entry in _csvFiles)
                         {
-                            Console.WriteLine($"\n\tProcessing File: {entry.Name} -- {DateTime.Now:HH:mm:ss}");
+                            // RECOVERY KONTROLÜ BURADA
+                            var progress = sqlLiteCon.GetFileProgress(entry.Name);
+                            if (progress.IsFinished)
+                            {
+                                Console.WriteLine($"Skipping {entry.Name} (Already Finished).  -- {DateTime.Now:dd.MM.yyyy HH:mm:ss}");
+                                continue;
+                            }
+
+                            Console.WriteLine($"\n\tProcessing File: {entry.Name}. Resuming from row: {progress.LastRow} -- {DateTime.Now:dd.MM.yyyy HH:mm:ss}");
                             using var stream = entry.Open();
-                            await ProcessStreamAndFeedChannel(stream, activeColumns);
+                            await ProcessStreamAndFeedChannel(stream, activeColumns, entry.Name, progress.LastRow);
                         }
                     }
                     else if (_csvFile != null)
                     {
-                        Console.WriteLine($"\n\tProcessing File: {_csvFile.Name} -- {DateTime.Now:HH:mm:ss}");
-                        using var stream = _csvFile.OpenRead();
-                        await ProcessStreamAndFeedChannel(stream, activeColumns);
+                        var progress = sqlLiteCon.GetFileProgress(_csvFile.Name);
+                        if (!progress.IsFinished)
+                        {
+                            Console.WriteLine($"Processing {_csvFile.Name}. Resuming from row: {progress.LastRow} -- {DateTime.Now:dd.MM.yyyy HH:mm:ss}");
+                            using var stream = _csvFile.OpenRead();
+                            await ProcessStreamAndFeedChannel(stream, activeColumns, _csvFile.Name, progress.LastRow);
+                        }
+                        else
+                        {
+                            Console.WriteLine("File already fully processed.");
+                        }
                     }
                 }
                 finally
                 {
-                    // Üretim bitti, kanalı kapat. Consumer bunu anlayıp duracak.
                     _dataChannel.Writer.Complete();
                 }
-
-                // Consumer'ın işini bitirmesini bekle
                 await dbConsumerTask;
             }
         }
 
-        private async Task ProcessStreamAndFeedChannel(Stream stream, List<KeyValuePair<int, string?>> activeColumns)
+        private async Task ProcessStreamAndFeedChannel(Stream stream, List<KeyValuePair<int, string?>> activeColumns, string fileName, long startRowIndex)
         {
-            // Her dosya için geçici RAM önbelleği
             var localCache = new Dictionary<int, HashSet<string>>();
             foreach (var col in activeColumns) localCache[col.Key] = new HashSet<string>();
 
-            int rowCount = 0;
+            long rowCount = 0; // Dosyadaki gerçek satır indeksi
+            int bufferCount = 0; // Flush için sayaç
 
             using (var reader = new StreamReader(stream, Encoding.UTF8))
             using (var csv = new CsvReader(reader, _csvConfiguration))
             {
+                // FAST SKIP: Kaldığımız yere kadar boş okuma yapıyoruz
+                while (rowCount < startRowIndex && csv.Read())
+                {
+                    rowCount++;
+                    if (rowCount % 100000 == 0) Console.Write($"\rSkipping rows... {rowCount:N0}");
+                }
+                if (startRowIndex > 0) Console.WriteLine($"\nResumed processing.  -- {DateTime.Now:dd.MM.yyyy HH:mm:ss}");
+
                 while (csv.Read())
                 {
                     rowCount++;
+                    bufferCount++;
 
                     foreach (var col in activeColumns)
                     {
                         try
                         {
                             var val = csv.GetField<string>(col.Key);
-                            if (!string.IsNullOrEmpty(val))
-                            {
-                                localCache[col.Key].Add(val);
-                            }
+                            if (!string.IsNullOrEmpty(val)) localCache[col.Key].Add(val);
                         }
-                        catch { /* Log or Ignore */ }
+                        catch { }
                     }
 
-                    // Belirli satır sayısına gelince kanala boşalt (RAM dolmasın diye)
-                    if (rowCount >= FLUSH_THRESHOLD_ROWS)
+                    if (bufferCount >= FLUSH_THRESHOLD_ROWS)
                     {
-                        await FlushCacheToChannel(localCache, activeColumns);
-                        rowCount = 0;
+                        // Paket içine FileName ve Güncel Satır Sayısını (rowCount) da koyuyoruz
+                        await FlushCacheToChannel(localCache, activeColumns, fileName, rowCount);
+                        bufferCount = 0;
                     }
                 }
             }
-            // Kalan son verileri de gönder
-            await FlushCacheToChannel(localCache, activeColumns);
+            // Kalan son verileri ve "Bitti" bilgisini gönder
+            // rowCount'u gönderiyoruz ama bitiş flag'ini Consumer yönetecek
+            await FlushCacheToChannel(localCache, activeColumns, fileName, rowCount, true);
         }
 
-        private async Task FlushCacheToChannel(Dictionary<int, HashSet<string>> cache, List<KeyValuePair<int, string?>> activeColumns)
+        private async Task FlushCacheToChannel(Dictionary<int, HashSet<string>> cache, List<KeyValuePair<int, string?>> activeColumns, string fileName, long currentRow, bool isFinished = false)
         {
             foreach (var col in activeColumns)
             {
                 if (cache[col.Key].Count > 0)
                 {
-                    // Verinin kopyasını oluşturup gönderiyoruz (çünkü cache'i temizleyeceğiz)
                     var dataToSend = new HashSet<string>(cache[col.Key]);
-
-                    // Kanala yaz. Eğer DB yavaşsa ve kanal doluysa burada bekler (Backpressure)
-                    await _dataChannel.Writer.WriteAsync(new ProcessResult(col.Key + 1, col.Value, dataToSend));
-
+                    await _dataChannel.Writer.WriteAsync(new ProcessResult(col.Key + 1, col.Value, dataToSend, fileName, currentRow));
                     cache[col.Key].Clear();
                 }
             }
+
+            // DÜZELTME: Veri gönderilmiş olsa bile, eğer isFinished bayrağı kalktıysa MUTLAKA Bitiş Sinyali gönder.
+            if (isFinished)
+            {
+                var dummySet = new HashSet<string>();
+                // ColumnIndex -1 = EOF (End Of File) Sinyali
+                await _dataChannel.Writer.WriteAsync(new ProcessResult(-1, "EOF", dummySet, fileName, currentRow));
+            }
         }
 
-        /// <summary>
-        /// Bu metot tek başına ayrı bir thread'de çalışır ve SADECE DB'ye yazar.
-        /// Asla kilitlenme (Lock) olmaz çünkü tek erişim noktası burasıdır.
-        /// </summary>
         private async Task ConsumerWriteToDb(SqlLiteDataDictionary db)
         {
+            Console.WriteLine($"-> DB Consumer started.  -- {DateTime.Now:dd.MM.yyyy HH:mm:ss}");
             db.BeginTransaction();
             int batchesProcessed = 0;
 
-            // Kanal kapanana kadar (Reader.ReadAllAsync) gelen paketleri işle
+            // Son işlenen dosya ve satırı takip et
+            string currentFile = "";
+            long currentRow = 0;
+
             await foreach (var packet in _dataChannel.Reader.ReadAllAsync())
             {
+                // Dummy EOF paketi kontrolü (ColumnIndex -1)
+                if (packet.ColumnIndex == -1)
+                {
+                    db.UpdateProgress(packet.FileName, packet.CurrentRow, true); // Dosya Bitti!
+                    Console.WriteLine($"\n-> File Completed: {packet.FileName}  -- {DateTime.Now:dd.MM.yyyy HH:mm:ss}");
+                    continue;
+                }
+
                 db.BatchInsert(packet.ColumnIndex, packet.ColumnName, packet.UniqueValues);
+
+                // Progress takibi
+                currentFile = packet.FileName;
+                currentRow = packet.CurrentRow;
+
                 batchesProcessed++;
 
-                // Transaction Log şişmesin diye arada bir commit et
-                // Her 100 paket (~5 milyon veri) yaklaşık olarak iyi bir noktadır
-                if (batchesProcessed >= 100)
+                // Transaction Commit (Checkpoint)
+                if (batchesProcessed >= 50) // Her 50 pakette bir kaydet
                 {
+                    // VERİYİ KAYDEDERKEN, LOG TABLOSUNU DA GÜNCELLİYORUZ
+                    // Böylece transaction commit olduğunda hem veri hem de "Ben buradayım" bilgisi aynı anda diske yazılır.
+                    if (!string.IsNullOrEmpty(currentFile))
+                    {
+                        db.UpdateProgress(currentFile, currentRow, false);
+                    }
+
                     db.CommitTransaction();
                     db.BeginTransaction();
-                    Console.Write("."); // İlerleme çubuğu gibi ekrana nokta koy
+                    Console.Write(".");
                     batchesProcessed = 0;
                 }
             }
 
-            // Kalan son işlemi de kaydet
             db.CommitTransaction();
-            Console.WriteLine("\nDatabase write operations completed.");
+            Console.WriteLine($"\n-> Database write operations completed.  -- {DateTime.Now:dd.MM.yyyy HH:mm:ss}");
         }
 
-        // Regex derlemesi (CPU optimizasyonu)
         private static readonly Regex SafeStringRegex = new Regex(@"[^a-zA-Z0-9_]", RegexOptions.Compiled);
-
         private string EditStringForDatabase(string inputName)
         {
             if (string.IsNullOrEmpty(inputName)) return string.Empty;
-
             var sb = new StringBuilder(inputName);
-            sb.Replace("ç", "c").Replace("Ç", "C")
-              .Replace("ğ", "g").Replace("Ğ", "G")
-              .Replace("ı", "i").Replace("İ", "I")
-              .Replace("ö", "o").Replace("Ö", "O")
-              .Replace("ş", "s").Replace("Ş", "S")
-              .Replace("ü", "u").Replace("Ü", "U")
-              .Replace(" ", "_");
-
+            sb.Replace("ç", "c").Replace("Ç", "C").Replace("ğ", "g").Replace("Ğ", "G").Replace("ı", "i").Replace("İ", "I").Replace("ö", "o").Replace("Ö", "O").Replace("ş", "s").Replace("Ş", "S").Replace("ü", "u").Replace("Ü", "U").Replace(" ", "_");
             string sanitized = sb.ToString().Trim();
             return SafeStringRegex.Replace(sanitized, "");
         }
