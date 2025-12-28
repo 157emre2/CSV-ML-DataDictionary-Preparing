@@ -55,9 +55,85 @@ switch (entry)
             new CsvtoDataDictionary(null, new(csvFilePath), delimiter, ignoredList, outputPath);
         else
             Console.WriteLine("You must give zip or csv file. Please try again.");
-        return;
+        break;
     case 2:
-        Console.WriteLine("deneme");
+        // 1. AYARLAR: Dosya yollarını burada belirle
+        // Sözlüklerin olduğu ZIP (Step 1 çıktısı)
+        Console.Write("Where is Data Dictionaries Zip..: ");
+        var dictionariesZipPath = Console.ReadLine();
+
+        // 200 GB'lık ham verinin olduğu ZIP (Parçalı CSV'ler)
+        Console.Write("Where is Input Raw Data Zip..: ");
+        var inputRawDataZipPath = Console.ReadLine();
+
+        // Çıktının nereye kaydedileceği (ZIP olarak oluşacak)
+        Console.Write("Where is Output Folder..: ");
+        var outputZipPath = Console.ReadLine();
+
+        // CSV Ayırıcı (Noktalı virgül mü, virgül mü? Önemli!)
+        Console.Write("What is the delimiter of your CSV file? (default is ';')");
+        var delimiterSec = !string.IsNullOrEmpty(Console.ReadLine()) ? Console.ReadLine() : ";";
+
+        //İşlenecek sütun indeksleri (0 tabanlı).
+        var columnsToProcess = new List<int> { 4, 7, 16, 106, 107, 108, 120, 123, 124, 150, 161, 162, 164, 166, 183, 184, 221, 222, 224, 437, 443, 455, 459, 460, 477, 482, 489, 491 };
+
+        Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Uygulama Başlatılıyor...");
+
+        try
+        {
+            // 2. ZIP DOSYALARINI AÇ (Okuma Modunda)
+            // 'using' bloğu bitene kadar bu dosyalar açık kalır, böylece entry'lere erişebiliriz.
+            using var dictArchive = ZipFile.OpenRead(dictionariesZipPath);
+            using var inputArchive = ZipFile.OpenRead(inputRawDataZipPath);
+
+            // 3. Dosyaları Listele (Filtreleme yapabilirsin)
+            // Sözlük ZIP'indeki tüm dosyaları alıyoruz (veya isme göre filtrele)
+            var dictionaryEntries = dictArchive.Entries
+                                    .Where(x => !string.IsNullOrEmpty(x.Name) && x.Name.EndsWith(".csv"))
+                                    .ToList();
+
+            // Ham veri ZIP'indeki CSV dosyalarını alıyoruz
+            var inputEntries = inputArchive.Entries
+                                    .Where(x => !string.IsNullOrEmpty(x.Name) && x.Name.EndsWith(".csv") && !x.Name.Contains("columns.csv", StringComparison.OrdinalIgnoreCase))
+                                    .OrderBy(x => x.Name) // Sıralı işlemek her zaman iyidir
+                                    .ToList();
+
+            var columnNamesEntry = inputArchive.Entries
+                                    .FirstOrDefault(x => x.Name.Equals("columns.csv", StringComparison.OrdinalIgnoreCase));
+
+            Console.WriteLine($"-> Bulunan Sözlük Dosyası: {dictionaryEntries.Count}");
+            Console.WriteLine($"-> Bulunan Ham Veri Dosyası: {inputEntries.Count}");
+
+            // 4. SINIFI BAŞLAT
+            // columnNames kısmına şimdilik null geçiyoruz (Header yazmıyoruz)
+            var converter = new DataDictionaryToCSV(
+                dictionaryEntries,
+                columnNamesEntry,
+                delimiterSec,
+                outputZipPath,
+                inputEntries,
+                columnsToProcess
+            );
+
+            // 5. ADIM A: Sözlükleri RAM'e Yükle
+            // Bu aşamada RAM kullanımı artacak (8-16 GB arası olabilir)
+            converter.LoadDictionaries();
+
+            // 6. ADIM B: İşlemi Başlat
+            // Bu aşama CPU ve Disk yoğundur, uzun sürecektir.
+            converter.ProcessAndSave();
+
+            converter.CategoryCsvMappingFile();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"\n!!! KRİTİK HATA !!!\n{ex.Message}");
+            Console.WriteLine(ex.StackTrace);
+        }
+
+        Console.WriteLine($"\n[{DateTime.Now:HH:mm:ss}] Program Sonlandı.");
+        // Konsol hemen kapanmasın diye:
+        Console.ReadLine();
         break;
     default:
         Console.WriteLine("Invalid entry. Restart the application and try again.");
