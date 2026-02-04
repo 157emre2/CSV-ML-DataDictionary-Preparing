@@ -217,7 +217,7 @@ namespace CSV_ML_DataDictionary_Preparing
                             }
                             else if (i == 7)
                             {
-                                if (!string.IsNullOrEmpty(rawValue) && DateTime.TryParse(rawValue, out var date))
+                                if (!string.IsNullOrEmpty(rawValue) && DateTime.TryParse(rawValue, out var date) && date.Year >= 2022)
                                 {
                                     var dayOfWeek = (int)_calendar.GetDayOfWeek(date);
                                     var dayOfMonth = _calendar.GetDayOfMonth(date);
