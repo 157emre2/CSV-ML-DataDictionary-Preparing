@@ -54,10 +54,10 @@ namespace CSV_ML_DataDictionary_Preparing
 
         public struct DateFeatures
         {
-            public string IsBlackFriday;      
-            public string IsHoliday;          
-            public string DaysBeforeHoliday;  
-            public string DaysAfterHoliday;   
+            public string IsBlackFriday;
+            public string IsHoliday;
+            public string DaysBeforeHoliday;
+            public string DaysAfterHoliday;
         }
 
         public void LoadDictionaries()
@@ -86,7 +86,7 @@ namespace CSV_ML_DataDictionary_Preparing
                 Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] -> Loading Column {colIndex + 1} (Size: {fileSize / 1024 / 1024} MB)...");
 
                 var dict = new Dictionary<string, string>(StringComparer.Ordinal);
-                
+
                 var nextCatId = 1;
 
                 using (var stream = entry.Open())
@@ -225,39 +225,24 @@ namespace CSV_ML_DataDictionary_Preparing
                                     var dateFeatures = _dateFeaturesLookup.GetValueOrDefault(date.Date);
 
                                     csvWriter.WriteField(date);
-                                    csvWriter.WriteField(dayOfMonth);
-                                    csvWriter.WriteField(_calendar.GetWeekOfYear(date, CalendarWeekRule.FirstFourDayWeek, DayOfWeek.Monday));
                                     csvWriter.WriteField(month);
-                                    csvWriter.WriteField(GetQuarter(month));
-                                    csvWriter.WriteField(_calendar.GetYear(date));
-                                    csvWriter.WriteField(date.ToString("HH:mm:ss"));
                                     csvWriter.WriteField(dayOfWeek == 0 ? 7 : dayOfWeek);
                                     csvWriter.WriteField(BinaryLookup[dayOfWeek / 6]);
                                     csvWriter.WriteField(dayOfMonth < 10 ? "1" : "0");
                                     csvWriter.WriteField(dayOfMonth > 20 ? "1" : "0");
-                                    csvWriter.WriteField(dateFeatures.IsBlackFriday);
                                     csvWriter.WriteField(dateFeatures.IsHoliday);
                                     csvWriter.WriteField(dateFeatures.DaysBeforeHoliday);
-                                    csvWriter.WriteField(dateFeatures.DaysAfterHoliday);
-                                    
-                                }else
-                                {
-                                    for (int x = 0; x < 15; x++)
-                                    {
-                                        csvWriter.WriteField("-1");
-                                    }
                                 }
-                                    continue;
+                                continue;
                             }
                             else if (decimal.TryParse(encodedValue, out decimal numValue))
                             {
-                                if (i != 16 && i != 107)
-                                    encodedValue = numValue.ToString("F2", CultureInfo.InvariantCulture);
+                                encodedValue = numValue.ToString("F2", CultureInfo.InvariantCulture);
                             }
 
                             csvWriter.WriteField(encodedValue);
 
-                            if(i == 477)
+                            if (i == 477)
                             {
                                 var catIdToWrite = "-1";
 
@@ -297,11 +282,6 @@ namespace CSV_ML_DataDictionary_Preparing
             }
             catch { }
             return -1;
-        }
-
-        private int GetQuarter(int month)
-        {
-            return (month + 2) / 3;
         }
 
         private void InitializeDateFeatures(int startYear, int endYear)

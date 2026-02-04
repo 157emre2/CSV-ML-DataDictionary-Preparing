@@ -75,7 +75,7 @@ switch (entry)
         var delimiterSec = !string.IsNullOrEmpty(Console.ReadLine()) ? Console.ReadLine() : ";";
 
         //İşlenecek sütun indeksleri (0 tabanlı).
-        var columnsToProcess = new List<int> { 4, 7, 16, 106, 107, 108, 120, 123, 124, 150, 161, 162, 164, 166, 183, 184, 221, 222, 224, 437, 443, 455, 459, 460, 477, 482, 489, 491 };
+        var columnsToProcess = new List<int> { 7, 460, 477, 482, 489, 491 };
 
         Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Uygulama Başlatılıyor...");
 
