@@ -233,7 +233,7 @@ namespace CSV_ML_DataDictionary_Preparing
                                     csvWriter.WriteField(dateFeatures.IsHoliday);
                                     csvWriter.WriteField(dateFeatures.DaysBeforeHoliday);
                                 }
-                                continue;
+                                break;
                             }
                             else if (decimal.TryParse(encodedValue, out decimal numValue))
                             {
