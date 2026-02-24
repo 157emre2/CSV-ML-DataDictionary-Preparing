@@ -195,6 +195,7 @@ namespace CSV_ML_DataDictionary_Preparing
                 while (csvReader.Read())
                 {
                     totalRows++;
+                    var dateCorrect = true;
 
                     for (int i = 0; i < csvReader.Context.Parser.Count; i++)
                     {
@@ -214,6 +215,8 @@ namespace CSV_ML_DataDictionary_Preparing
                                 {
                                     encodedValue = "-1";
                                 }
+
+                                csvWriter.WriteField(encodedValue);
                             }
                             else if (i == 7)
                             {
@@ -232,15 +235,17 @@ namespace CSV_ML_DataDictionary_Preparing
                                     csvWriter.WriteField(dayOfMonth > 20 ? "1" : "0");
                                     csvWriter.WriteField(dateFeatures.IsHoliday);
                                     csvWriter.WriteField(dateFeatures.DaysBeforeHoliday);
+                                }else
+                                {
+                                    dateCorrect = false;
+                                    break;
                                 }
-                                break;
                             }
                             else if (decimal.TryParse(encodedValue, out decimal numValue))
                             {
                                 encodedValue = numValue.ToString("F2", CultureInfo.InvariantCulture);
+                                csvWriter.WriteField(encodedValue);
                             }
-
-                            csvWriter.WriteField(encodedValue);
 
                             if (i == 477)
                             {
@@ -256,7 +261,7 @@ namespace CSV_ML_DataDictionary_Preparing
                         }
                     }
 
-                    csvWriter.NextRecord();
+                    if (dateCorrect) csvWriter.NextRecord();
 
                     // İlerleme çubuğuna da saat ekledim, böylece hızını anlık görebilirsin.
                     if (totalRows % 100000 == 0)
